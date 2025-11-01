@@ -1,0 +1,58 @@
+# Custom Gitea Actions runner with JDK 21, Node 22, Docker, CUDA 13, and Maven cache
+# Supports RTX 2070 (Turing) and RTX 4080 (Ada Lovelace) GPUs
+FROM nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04
+
+# Install JDK 21
+RUN apt-get update && \
+    apt-get install -y wget apt-transport-https ca-certificates gnupg && \
+    wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /usr/share/keyrings/adoptium-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/adoptium-archive-keyring.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptium.list && \
+    apt-get update && \
+    apt-get install -y temurin-21-jdk && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Docker, Node.js 22, pnpm, and essentials
+RUN apt-get update && \
+    apt-get install -y curl git build-essential lsb-release && \
+    # Add Docker's official GPG key
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    chmod a+r /etc/apt/keyrings/docker.gpg && \
+    # Add Docker repository
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    # Install Docker Engine, containerd, and Docker Compose plugin
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && \
+    # Install Node.js 22
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install -g pnpm && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set JAVA_HOME
+ENV JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# Pre-configure Gradle to use Nexus mirror
+# This will be used by any Gradle wrapper that runs in containers based on this image
+RUN mkdir -p /root/.gradle && \
+    cat > /root/.gradle/init.gradle << 'GRADLEOF'
+allprojects {
+    repositories {
+        maven {
+            url "https://maven.rokkon.com/repository/maven-public/"
+            allowInsecureProtocol = false
+        }
+        mavenCentral()
+    }
+}
+GRADLEOF
+
+# Set working directory
+WORKDIR /workspace
+
+LABEL maintainer="krickert@rokkon.com"
+LABEL description="Pipeline CI/CD runner: JDK 21 + Node 22 + pnpm + Gradle + Docker + CUDA 13.0 + cuDNN + Nexus"
+LABEL supported-gpus="RTX 2070 (Turing), RTX 4080 (Ada Lovelace)"

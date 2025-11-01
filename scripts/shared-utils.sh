@@ -13,7 +13,8 @@ NC='\033[0m' # No Color
 
 # Get project root directory
 get_project_root() {
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
     echo "$(cd "$script_dir/.." && pwd)"
 }
 
@@ -43,9 +44,11 @@ print_status() {
 
 # Get Docker bridge IP for service registration
 get_docker_bridge_ip() {
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local bridge_script="$script_dir/detect-docker-bridge.sh"
-    
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local bridge_script
+    bridge_script="$script_dir/detect-docker-bridge.sh"
+
     if [[ -x "$bridge_script" ]]; then
         "$bridge_script" detect 2>/dev/null
     else
@@ -56,8 +59,10 @@ get_docker_bridge_ip() {
 
 # Set registration host environment variable
 set_registration_host() {
-    local service_name="$1"
-    local env_var_name="${2:-${service_name^^}_HOST}"  # Default to SERVICE_HOST
+    local service_name
+    service_name="$1"
+    local env_var_name
+    env_var_name="${2:-${service_name^^}_HOST}"  # Default to SERVICE_HOST
 
     # Check if already set
     if [[ -n "${!env_var_name}" ]]; then
@@ -187,13 +192,18 @@ check_infrastructure_status() {
 
 # Start a Quarkus service in dev mode
 start_quarkus_service() {
-    local service_name="$1"
-    local port="$2"
-    local gradle_path="$3"
-    local description="$4"
-    
-    local project_root="$(get_project_root)"
-    
+    local service_name
+    service_name="$1"
+    local port
+    port="$2"
+    local gradle_path
+    gradle_path="$3"
+    local description
+    description="$4"
+
+    local project_root
+    project_root="$(get_project_root)"
+
     print_status "header" "Starting $service_name"
     print_status "info" "Port: $port"
     print_status "info" "Description: $description"
@@ -229,9 +239,12 @@ start_quarkus_service() {
 
 # Wait for service to be ready
 wait_for_service() {
-    local service_name="$1"
-    local port="$2"
-    local max_attempts="${3:-30}"
+    local service_name
+    service_name="$1"
+    local port
+    port="$2"
+    local max_attempts
+    max_attempts="${3:-30}"
     local attempt=1
     
     print_status "info" "Waiting for $service_name to be ready on port $port..."

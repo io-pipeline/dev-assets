@@ -19,7 +19,7 @@ BASE_DIR="${HOME}/IdeaProjects/gitea"
 # Use SSH for repos you need to push to
 REPOS=(
     "account-service:https"
-    "grpc-stubs:https"
+    "grpc:https"
     "libraries:https"
     "dev-assets:ssh"
 )
@@ -135,7 +135,9 @@ echo ""
 # Show repository status
 echo -e "${BLUE}Repository status:${NC}"
 echo ""
-for repo in "${REPOS[@]}"; do
+for repo_config in "${REPOS[@]}"; do
+    # Parse repo name from config
+    IFS=':' read -r repo protocol <<< "$repo_config"
     REPO_DIR="$BASE_DIR/$repo"
     if [ -d "$REPO_DIR/.git" ]; then
         cd "$REPO_DIR"
@@ -169,15 +171,15 @@ echo ""
 # echo -e "${BLUE}Building projects...${NC}"
 # echo ""
 #
-# # Build grpc-stubs first (dependency for other projects)
-# if [ -d "$BASE_DIR/grpc-stubs" ]; then
-#     echo -e "${YELLOW}Building grpc-stubs...${NC}"
-#     cd "$BASE_DIR/grpc-stubs"
+# # Build grpc first (dependency for other projects)
+# if [ -d "$BASE_DIR/grpc" ]; then
+#     echo -e "${YELLOW}Building grpc...${NC}"
+#     cd "$BASE_DIR/grpc"
 #     if [ -f "gradlew" ]; then
 #         ./gradlew clean build publishToMavenLocal --no-daemon
-#         print_status "Built grpc-stubs"
+#         print_status "Built grpc"
 #     else
-#         print_error "No gradlew found in grpc-stubs"
+#         print_error "No gradlew found in grpc"
 #     fi
 #     echo ""
 # fi

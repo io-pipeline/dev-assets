@@ -50,5 +50,6 @@ woodstox|https://github.com/FasterXML/woodstox.git|-
 jimfs|https://github.com/google/jimfs.git|-
 rest-assured|https://github.com/rest-assured/rest-assured.git|-
 gatling|https://github.com/gatling/gatling.git|-
+gitea|https://github.com/go-gitea/gitea.git|-
 # end additions
 

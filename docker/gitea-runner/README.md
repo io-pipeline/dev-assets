@@ -21,7 +21,7 @@ docker build -t git.rokkon.com/io-pipeline/gitea-runner:cuda13 .
 
 The runner must have access to the Docker socket for DinD support:
 
-```bash
+```bash 
 docker run -d \
   --name gitea-runner \
   --gpus all \

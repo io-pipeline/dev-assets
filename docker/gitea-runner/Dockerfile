@@ -14,7 +14,7 @@ RUN apt-get update && \
 
 # Install Docker, Node.js 22, pnpm, and essentials
 RUN apt-get update && \
-    apt-get install -y curl git build-essential lsb-release && \
+    apt-get install -y curl git build-essential lsb-release mysql-client netcat-openbsd jq kafkacat && \
     # Add Docker's official GPG key
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
@@ -49,6 +49,11 @@ allprojects {
     }
 }
 GRADLEOF
+
+# Install grpcurl
+RUN curl -L https://github.com/fullstorydev/grpcurl/releases/download/v1.9.3/grpcurl_1.9.3_linux_x86_64.tar.gz | tar -xz && \
+    mv grpcurl /usr/local/bin/ && \
+    chmod +x /usr/local/bin/grpcurl
 
 # Set working directory
 WORKDIR /workspace

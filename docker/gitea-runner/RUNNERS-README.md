@@ -63,9 +63,10 @@ services:
       - GITEA_RUNNER_LABELS=ubuntu-latest:docker://git.rokkon.com/io-pipeline/gitea-runner:latest
 
   gitea-runner-3:
-    image: gitea/act_runner:latest
+    image: git.rokkon.com/io-pipeline/gitea-runner:cuda13
     container_name: gitea-runner-3
     restart: unless-stopped
+    privileged: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - gitea-runner-3-data:/data
@@ -74,7 +75,7 @@ services:
       - GITEA_RUNNER_REGISTRATION_TOKEN=${RUNNER_TOKEN}
       - GITEA_RUNNER_NAME=pipeline-runner-3-cuda
       # Supports both ubuntu-latest AND cuda workloads
-      - GITEA_RUNNER_LABELS=ubuntu-latest:docker://git.rokkon.com/io-pipeline/gitea-runner:latest,cuda:docker://git.rokkon.com/io-pipeline/gitea-runner:cuda13
+      - GITEA_RUNNER_LABELS=ubuntu-latest:docker://git.rokkon.com/io-pipeline/gitea-runner:cuda13,cuda:docker://git.rokkon.com/io-pipeline/gitea-runner:cuda13
     deploy:
       resources:
         reservations:

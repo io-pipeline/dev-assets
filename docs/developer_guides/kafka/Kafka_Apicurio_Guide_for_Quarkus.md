@@ -28,59 +28,188 @@ This guide provides a "no-magic" approach that is reliable, debuggable, and work
 
 ### **Part 1: The Foundation - Docker Compose for Dev Services**
 
-Your tests and local development need running instances of Kafka and Apicurio. The best way to manage this is with a Docker Compose file that Quarkus can automatically start and manage.
+Your tests and local development need running instances of Kafka, Apicurio, and MySQL. The best way to manage this is with a Docker Compose file that Quarkus can automatically start and manage.
 
-**`src/test/resources/docker-compose-test-services.yml`**
-(This minimal file is all you need for the test environment)
+#### **Understanding the Listener Configuration**
 
-TODO: go over how we need to expose the LOCALHOST and how the code uses that in tests, how a real running environment would use the other setup.  Also point out that this example is plaintext and how production should use TLS.  Also, we need to add the Kafka topic to the compose file.
+Kafka requires multiple listeners when running in Docker:
+- **PLAINTEXT** (`kafka-test:9092`): Internal listener for container-to-container communication (e.g., Apicurio connecting to Kafka)
+- **LOCALHOST** (`localhost:9093`): External listener for your test code running on the host machine
+- **CONTROLLER** (`kafka-test:9094`): KRaft controller listener for internal cluster management
+
+Your tests use the LOCALHOST listener, while Apicurio uses the PLAINTEXT listener. This dual-listener setup is critical for Docker networking.
+
+#### **Production vs Test Environments**
+
+- **Test Environment** (shown below): Uses plaintext connections, in-memory storage for Apicurio, and exposed ports for direct access from test code
+- **Production Environment**: Should use TLS encryption, persistent storage for Apicurio (SQL database), authentication, and internal networking without exposed ports
+
+**`src/test/resources/compose-test-services.yml`**
+(Complete test environment with Kafka, Apicurio, and MySQL)
 
 
 
 ```yaml
 version: '3.8'
 
+networks:
+  pipeline-test-network:
+    driver: bridge
+
 services:
-  kafka-test:
-    image: apache/kafka:4.1.0 # Or your preferred Kafka/Redpanda image
-    hostname: kafka-test
+  # MySQL - Required for Apicurio SQL storage and application tests
+  mysql-test:
+    container_name: pipeline-mysql-test
+    image: mysql:8.0
+    networks:
+      - pipeline-test-network
     ports:
-      - "9092:9092" # Port for the app inside Docker
-      - "9093:9093" # Exposed host port for tests
+      - "3307:3306"  # Exposed to host on 3307 to avoid conflicts with local MySQL
     environment:
-      # --- Configuration for single-node KRaft mode ---
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: apicurio_registry
+      MYSQL_USER: pipeline
+      MYSQL_PASSWORD: password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Initialize databases (runs after MySQL is healthy)
+  init-db:
+    image: mysql:8.0
+    networks:
+      - pipeline-test-network
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+    command: >
+      bash -c "
+      until mysql -h mysql-test -u root -prootpassword -e 'SELECT 1' >/dev/null 2>&1; do
+        echo 'Waiting for MySQL...';
+        sleep 1;
+      done;
+      mysql -h mysql-test -u root -prootpassword -e \"
+      CREATE DATABASE IF NOT EXISTS apicurio_registry;
+      CREATE DATABASE IF NOT EXISTS pipeline_connector_test;
+      GRANT ALL PRIVILEGES ON apicurio_registry.* TO 'pipeline'@'%';
+      GRANT ALL PRIVILEGES ON pipeline_connector_test.* TO 'pipeline'@'%';
+      FLUSH PRIVILEGES;
+      \"
+      "
+
+  # Kafka - KRaft mode (no Zookeeper needed)
+  kafka-test:
+    container_name: pipeline-kafka-test
+    image: confluentinc/cp-kafka:7.7.1
+    hostname: kafka-test
+    networks:
+      - pipeline-test-network
+    ports:
+      - "9092:9092"  # Internal listener (for Apicurio)
+      - "9093:9093"  # External listener (for host/tests)
+    environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,LOCALHOST:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,LOCALHOST://0.0.0.0:9094
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094,LOCALHOST://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-test:9092,LOCALHOST://localhost:9093
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-test:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-test:9094
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CLUSTER_ID: 'test-cluster-id'
+      CLUSTER_ID: 'pipeline-test-cluster'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    labels:
-      # This label is a command to Quarkus:
-      # "When this container (on internal port 9094) is ready,
-      #  set the 'kafka.bootstrap.servers' property to the exposed host port."
-      io.quarkus.devservices.compose.config_map.9094: kafka.bootstrap.servers
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9092
+      interval: 5s
+      timeout: 10s
+      retries: 10
 
+  # Apicurio Schema Registry - SQL storage with MySQL
   apicurio-registry-test:
+    container_name: pipeline-apicurio-test
     image: apicurio/apicurio-registry:3.0.11
+    networks:
+      - pipeline-test-network
     ports:
-      - "8081:8080" # Port 8081 is exposed to the host
+      - "8081:8080"  # Apicurio API exposed on host port 8081
     environment:
       QUARKUS_PROFILE: 'prod'
-      APICURIO_STORAGE_KIND: 'mem' # Use in-memory storage for simple tests
-    labels:
-      # This label does the same for the Apicurio URL
-      io.quarkus.devservices.compose.config_map.8080: mp.messaging.connector.smallrye-kafka.apicurio.registry.url
+      # SQL storage configuration
+      APICURIO_STORAGE_KIND: 'sql'
+      APICURIO_STORAGE_SQL_KIND: 'mysql'
+      APICURIO_DATASOURCE_URL: 'jdbc:mysql://mysql-test:3306/apicurio_registry'
+      APICURIO_DATASOURCE_USERNAME: 'pipeline'
+      APICURIO_DATASOURCE_PASSWORD: 'password'
+      # Kafka configuration for Apicurio to use PLAINTEXT listener
+      KAFKA_BOOTSTRAP_SERVERS: 'kafka-test:9092'
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+      kafka-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 ```
+
+#### **Key Integration Points**
+
+1. **MySQL Integration**:
+   - Apicurio uses MySQL for persistent schema storage
+   - `init-db` service creates required databases: `apicurio_registry` and `pipeline_connector_test`
+   - Health checks ensure MySQL is ready before Apicurio starts
+
+2. **Network Configuration**:
+   - All services share the `pipeline-test-network` bridge network
+   - Services reference each other by container name (e.g., `kafka-test`, `mysql-test`)
+
+3. **Kafka Listener Strategy**:
+   - `PLAINTEXT://kafka-test:9092` - Used by Apicurio (container-to-container)
+   - `LOCALHOST://localhost:9093` - Used by host test code
+   - `CONTROLLER://kafka-test:9094` - KRaft internal
+
+4. **Health Checks**:
+   - Ensures services start in correct order
+   - Prevents Apicurio from starting before MySQL/Kafka are ready
+   - Tests can rely on `service_healthy` conditions
+
+5. **Port Mapping**:
+   - MySQL: `3307:3306` (avoids conflict with local MySQL on 3306)
+   - Kafka: `9093:9093` (external access for tests)
+   - Apicurio: `8081:8080` (API access from tests)
 
 ### **Part 2: `application.properties` Configuration**
 
 This file connects your Quarkus application to the services in Docker Compose.
-TODO go over the kafka peroperties here.  Discuss a bit about what every topic needs for a producer and a consumer in an apicurio specific setup.
+
+#### **Understanding Kafka Properties for Apicurio**
+
+Every Kafka producer and consumer in an Apicurio setup needs specific configuration:
+
+**Producer Requirements**:
+- `connector`: Set to `smallrye-kafka`
+- `topic`: The Kafka topic name
+- `key.serializer`: Usually `StringSerializer`
+- `value.serializer`: `io.apicurio.registry.serde.protobuf.ProtobufKafkaSerializer` for Protobuf messages
+- `apicurio.registry.auto-register`: Set to `true` to automatically register schemas
+- `apicurio.registry.artifact-id`: Unique identifier for the schema in Apicurio
+- `apicurio.registry.proto.message-name`: The Protobuf message class name
+
+**Consumer Requirements**:
+- `connector`: Set to `smallrye-kafka`
+- `topic`: The Kafka topic name to subscribe to
+- `value.deserializer`: `io.apicurio.registry.serde.protobuf.ProtobufKafkaDeserializer` for Protobuf messages
+- `apicurio.registry.deserializer.value.return-class`: **CRITICAL** - The fully qualified Java class name to deserialize to (prevents `DynamicMessage` issues)
+
+**Why `return-class` is Critical**:
+Without specifying `return-class`, the Protobuf deserializer creates a `DynamicMessage` instead of your concrete Java class, causing `ClassCastException` errors. This property tells the deserializer exactly which class to instantiate.
 
 ```properties
 # ======================================================
@@ -156,10 +285,122 @@ public class AccountEventPublisher {
 }
 ```
 
-TODO: add more reference links to the kafka docs.
+-----
 
-Reference:
-https://quarkus.io/guides/kafka
+## Alternative Approach: Using Testcontainers
+
+While Docker Compose works well for test environments, some services use Testcontainers for programmatic container management. This approach provides more control and better integration with JUnit lifecycle.
+
+### **Testcontainers Implementation**
+
+**Example from opensearch-manager (`OpenSearchTestResource.java`):**
+
+```java
+package io.pipeline.schemamanager;
+
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
+import org.jboss.logging.Logger;
+import org.opensearch.testcontainers.OpenSearchContainer;
+import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.utility.DockerImageName;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class OpenSearchTestResource implements QuarkusTestResourceLifecycleManager {
+
+    private static final Logger LOG = Logger.getLogger(OpenSearchTestResource.class);
+
+    private OpenSearchContainer<?> opensearch;
+    private KafkaContainer kafka;
+
+    @Override
+    public Map<String, String> start() {
+        Map<String, String> config = new HashMap<>();
+
+        // Start Kafka container
+        LOG.info("Starting Kafka test container...");
+        kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.7.1"))
+                .withReuse(true);  // Reuse container across test runs for speed
+        kafka.start();
+        String kafkaBootstrapServers = kafka.getBootstrapServers();
+        LOG.info("Kafka test container started at: " + kafkaBootstrapServers);
+
+        // Start OpenSearch container
+        LOG.info("Starting OpenSearch test container...");
+        opensearch = new OpenSearchContainer<>(DockerImageName.parse("opensearchproject/opensearch:3.3.2"))
+                .withAccessToHost(true)
+                .withReuse(true);
+        opensearch.start();
+        LOG.info("OpenSearch test container started at: " + opensearch.getHost() + ":" + opensearch.getFirstMappedPort());
+
+        String opensearchAddress = "http://" + opensearch.getHost() + ":" + opensearch.getFirstMappedPort();
+
+        // Configure both services for Quarkus
+        config.put("opensearch.hosts", opensearchAddress);
+        config.put("kafka.bootstrap.servers", kafkaBootstrapServers);
+        config.put("mp.messaging.connector.smallrye-kafka.bootstrap.servers", kafkaBootstrapServers);
+
+        return config;
+    }
+
+    @Override
+    public void stop() {
+        if (opensearch != null) {
+            LOG.info("Stopping OpenSearch test container...");
+            opensearch.stop();
+            LOG.info("OpenSearch test container stopped.");
+        }
+        if (kafka != null) {
+            LOG.info("Stopping Kafka test container...");
+            kafka.stop();
+            LOG.info("Kafka test container stopped.");
+        }
+    }
+}
+```
+
+### **Using the Test Resource**
+
+In your test class, register the resource:
+
+```java
+@QuarkusTest
+@QuarkusTestResource(OpenSearchTestResource.class)
+public class YourServiceTest {
+    // Tests automatically use the containers
+}
+```
+
+### **Testcontainers vs Docker Compose**
+
+**Testcontainers Advantages:**
+- Programmatic control over container lifecycle
+- Better integration with JUnit test lifecycle
+- Can reuse containers across test runs (faster)
+- Easier to customize per-test
+- Dynamic port allocation
+
+**Docker Compose Advantages:**
+- Simpler setup for multiple interdependent services
+- Easier to visualize full infrastructure
+- Better for services with complex dependencies (MySQL + Kafka + Apicurio)
+- Can be used for local development (not just tests)
+
+**When to Use Each:**
+- **Testcontainers**: Single or independent services (OpenSearch, single Kafka instance)
+- **Docker Compose**: Complex multi-service setups (Kafka + Apicurio + MySQL + init scripts)
+
+-----
+
+## References and Further Reading
+
+- [Quarkus Kafka Guide](https://quarkus.io/guides/kafka)
+- [Apicurio Registry Documentation](https://www.apicur.io/registry/docs/)
+- [SmallRye Reactive Messaging](https://smallrye.io/smallrye-reactive-messaging/)
+- [Kafka KRaft Mode](https://kafka.apache.org/documentation/#kraft)
+- [Testcontainers](https://www.testcontainers.org/)
+- [Quarkus Dev Services](https://quarkus.io/guides/dev-services)
 
 ### **Part 4: Application Code - The Consumer (Receiver)**
 
@@ -213,7 +454,37 @@ This is the pattern we built. It verifies your service sent the correct message 
 **Note:** This test uses the gRPC client to call the gRPC service. This is a common pattern in Quarkus.  The gRPC client is a separate service that is injected into your test.  This tutorial is focused on Kafka but it slso demonstrates how gRPC's protobuf replies can work well with Apicurio and Kafka. 
 
 **Dependencies (build.gradle):**
-TODO: show the kafka specific dependences but go into how this project has a toml for this
+
+The Pipeline project uses a centralized BOM (Bill of Materials) for dependency management. Key Kafka/Apicurio dependencies are managed through the BOM catalog:
+
+```groovy
+dependencies {
+    // Platform BOM provides version management
+    implementation platform('io.pipeline:pipeline-bom:1.0.0-SNAPSHOT')
+
+    // Quarkus Kafka support
+    implementation 'io.quarkus:quarkus-grpc'
+    implementation 'io.quarkus:quarkus-arc'
+
+    // Kafka messaging (versions managed by BOM)
+    // These are automatically included via pipeline-bom, but shown here for reference:
+    // - org.apache.kafka:kafka-clients
+    // - io.apicurio:apicurio-registry-serdes-protobuf-serde
+    // - io.smallrye.reactive:smallrye-reactive-messaging-kafka
+
+    // Test dependencies
+    testImplementation 'io.quarkus:quarkus-junit5'
+    testImplementation 'org.awaitility:awaitility'  // For async test assertions
+}
+```
+
+The BOM catalog (`pipeline-bom-catalog`) centralizes versions for:
+- Kafka clients (Confluent distribution)
+- Apicurio serializers/deserializers
+- SmallRye Reactive Messaging
+- Protobuf dependencies
+
+This ensures consistent versions across all Pipeline services and simplifies dependency management.
 
 **Test Class (`AccountEventPublisherTest.java`):**
 

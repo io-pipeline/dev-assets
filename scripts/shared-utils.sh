@@ -99,16 +99,6 @@ detect_docker_bridge_ip() {
         fi
     done
 
-    # Method 4: Use hostname -I to get local IPs (prefer non-loopback)
-    local local_ips
-    local_ips=$(hostname -I 2>/dev/null || echo "")
-    for ip in $local_ips; do
-        if [[ "$ip" != "127.0.0.1" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "$ip"
-            return 0
-        fi
-    done
-
     # Fallback to localhost
     print_status "warning" "Could not detect Docker bridge IP, using localhost"
     echo "localhost"

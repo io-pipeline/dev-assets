@@ -4,11 +4,11 @@
 # Usage: ./getLatestLogsFromCI.sh [run_number]
 #
 # Environment variables:
-#   GITEA_PAT - Required for authentication
+#   GIT_PAT - Required for authentication
 #
 # Example:
-#   GITEA_PAT=your_token ./getLatestLogsFromCI.sh
-#   GITEA_PAT=your_token ./getLatestLogsFromCI.sh 50
+#   GIT_PAT=your_token ./getLatestLogsFromCI.sh
+#   GIT_PAT=your_token ./getLatestLogsFromCI.sh 50
 
 set -e
 
@@ -51,10 +51,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Check for GITEA_PAT
-if [ -z "$GITEA_PAT" ]; then
-    echo -e "${RED}Error: GITEA_PAT environment variable not set${NC}"
-    echo "Usage: GITEA_PAT=your_token ./getLatestLogsFromCI.sh [run_number]"
+# Check for GIT_PAT
+if [ -z "$GIT_PAT" ]; then
+    echo -e "${RED}Error: GIT_PAT environment variable not set${NC}"
+    echo "Usage: GIT_PAT=your_token ./getLatestLogsFromCI.sh [run_number]"
     exit 1
 fi
 
@@ -63,14 +63,14 @@ RUN_NUMBER=${1:-}
 if [ -z "$RUN_NUMBER" ]; then
     echo -e "${GREEN}Fetching latest run number from actions page...${NC}"
     # Scrape the actions page to find latest run
-    PAGE_HTML=$(curl -s -H "Authorization: token $GITEA_PAT" "${GITEA_URL}/${REPO_OWNER}/${REPO_NAME}/actions")
+    PAGE_HTML=$(curl -s -H "Authorization: token $GIT_PAT" "${GITEA_URL}/${REPO_OWNER}/${REPO_NAME}/actions")
     # Try to extract run number from URL pattern /actions/runs/NUMBER
     RUN_NUMBER=$(echo "$PAGE_HTML" | grep -o 'actions/runs/[0-9]\+' | head -1 | grep -o '[0-9]\+')
 
     if [ -z "$RUN_NUMBER" ]; then
         echo -e "${RED}Could not determine latest run number${NC}"
         echo "Please specify run number manually:"
-        echo "  GITEA_PAT=\$GITEA_PAT ./getLatestLogsFromCI.sh <run_number>"
+        echo "  GIT_PAT=\$GIT_PAT ./getLatestLogsFromCI.sh <run_number>"
         echo ""
         echo "Find run number at: ${GITEA_URL}/${REPO_OWNER}/${REPO_NAME}/actions"
         exit 1
@@ -86,7 +86,7 @@ cd ci-artifacts
 # Download test-results
 echo -e "${GREEN}Downloading test-results.zip...${NC}"
 ARTIFACT_URL="${GITEA_URL}/${REPO_OWNER}/${REPO_NAME}/actions/runs/${RUN_NUMBER}/artifacts/test-results"
-curl -L -H "Authorization: token $GITEA_PAT" -o test-results.zip "$ARTIFACT_URL"
+curl -L -H "Authorization: token $GIT_PAT" -o test-results.zip "$ARTIFACT_URL"
 
 if [ -f test-results.zip ]; then
     echo -e "${GREEN}Downloaded test-results.zip${NC}"

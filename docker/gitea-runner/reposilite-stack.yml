@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  reposilite:
+    image: dzikoysk/reposilite:latest
+    container_name: reposilite
+    restart: unless-stopped
+    ports:
+      - "8888:8080"  # Direct access if needed (optional)
+    volumes:
+      - reposilite-data:/app/data
+      - reposilite-config:/app/configuration
+      - ./reposilite-configuration.cdn:/app/configuration/configuration.cdn:ro
+    environment:
+      # Java options for better performance
+      - JAVA_OPTS=-Xmx512M
+      # Reposilite configuration
+      - REPOSILITE_HOSTNAME=maven.rokkon.com
+      - REPOSILITE_PORT=8080
+      # FIRST RUN ONLY: Remove this line after generating permanent token
+      - REPOSILITE_OPTS=--token admin:changeme123
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+
+      # Main HTTP Router for Web UI and Maven repos
+      - "traefik.http.routers.reposilite.rule=Host(`maven.rokkon.com`)"
+      - "traefik.http.routers.reposilite.entrypoints=websecure"
+      - "traefik.http.routers.reposilite.tls=true"
+      - "traefik.http.routers.reposilite.service=reposilite"
+
+      # Service configuration
+      - "traefik.http.services.reposilite.loadbalancer.server.port=8080"
+
+      # Docker registry support (v2 API)
+      - "traefik.http.routers.reposilite-docker.rule=Host(`maven.rokkon.com`) && PathPrefix(`/v2`)"
+      - "traefik.http.routers.reposilite-docker.entrypoints=websecure"
+      - "traefik.http.routers.reposilite-docker.tls=true"
+      - "traefik.http.routers.reposilite-docker.service=reposilite"
+
+      # Middleware for proper headers
+      - "traefik.http.middlewares.reposilite-headers.headers.customresponseheaders.X-Reposilite-Version=3.x"
+      - "traefik.http.routers.reposilite.middlewares=reposilite-headers"
+
+volumes:
+  reposilite-data:
+    driver: local
+  reposilite-config:
+    driver: local
+
+networks:
+  proxy:
+    external: true
+    name: monitoring-stack_proxy

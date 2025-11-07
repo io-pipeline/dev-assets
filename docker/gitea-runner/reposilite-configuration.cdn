@@ -1,0 +1,40 @@
+# Reposilite Configuration
+# This file will be mounted into the container to pre-configure repositories
+
+# Hostname configuration
+hostname: maven.rokkon.com
+
+# Repository definitions
+repositories {
+  # Hosted repository for release artifacts
+  releases {
+    visibility: public
+    storageProvider: fs
+  }
+
+  # Hosted repository for snapshot artifacts
+  snapshots {
+    visibility: public
+    storageProvider: fs
+  }
+
+  # Proxy repository for Maven Central
+  maven-central {
+    visibility: public
+    storageProvider: fs
+    proxied: https://repo1.maven.org/maven2/
+  }
+
+  # npm registry (hosted)
+  npm {
+    visibility: public
+    storageProvider: fs
+  }
+
+  # npm registry proxy to npmjs.org
+  npm-proxy {
+    visibility: public
+    storageProvider: fs
+    proxied: https://registry.npmjs.org/
+  }
+}

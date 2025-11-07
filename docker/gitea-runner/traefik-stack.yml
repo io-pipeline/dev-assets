@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: always
+    ports:
+      - "80:80"      # Standard HTTP (redirects to HTTPS)
+      - "443:443"    # Standard HTTPS
+      - "9080:8080"  # Traefik dashboard API
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /home/krickert/rokkon-certs:/certs:ro
+      - traefik-data:/data
+      - /home/krickert/traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+    command:
+      - "--api.dashboard=true"
+      - "--api.debug=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=monitoring-stack_proxy"
+      - "--providers.file.filename=/etc/traefik/dynamic.yml"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.rokkon.com`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls=true"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=admin:$$2y$$05$$K9UamiE7ZDQddcSlXDyN4OluJyuTdqdGfP70bAab8Gvq/tIVn8Oau"
+    networks:
+      - proxy
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: docker-api-proxy
+    restart: always
+    ports:
+      - "2375:2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ALLOW_RESTARTS=1
+      - ALLOW_START=1
+      - ALLOW_STOP=1
+      - CONTAINERS=1
+      - IMAGES=1
+      - INFO=1
+      - NETWORKS=1
+      - NODES=1
+      - PLUGINS=1
+      - SERVICES=1
+      - SWARM=1
+      - SYSTEM=1
+      - TASKS=1
+      - VOLUMES=1
+      - BUILD=1
+      - COMMIT=1
+      - CONFIGS=1
+      - DISTRIBUTION=1
+      - EXEC=1
+      - GRPC=1
+      - POST=1
+    networks:
+      - proxy
+
+  # Traefik external service to proxy nas.rokkon.com to DSM on port 5001
+  nas-proxy:
+    image: traefik/whoami:latest  # Placeholder - Traefik will proxy to external IP
+    container_name: nas-proxy
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nas.rule=Host(`nas.rokkon.com`)"
+      - "traefik.http.routers.nas.entrypoints=websecure"
+      - "traefik.http.routers.nas.tls=true"
+      - "traefik.http.routers.nas.service=nas-dsm"
+      - "traefik.http.services.nas-dsm.loadbalancer.server.url=https://192.168.1.211:5001"
+      - "traefik.http.services.nas-dsm.loadbalancer.server.scheme=https"
+    networks:
+      - proxy
+
+volumes:
+  traefik-data:
+
+networks:
+  proxy:
+    name: monitoring-stack_proxy
+    driver: bridge

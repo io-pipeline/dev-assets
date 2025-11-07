@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  gitea:
+    image: gitea/gitea:latest
+    container_name: gitea
+    restart: unless-stopped
+    ports:
+      - "3030:3000"  # Direct access
+      - "2222:22"    # SSH for git
+    volumes:
+      - gitea-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__server__ROOT_URL=https://git.rokkon.com
+      - GITEA__server__DOMAIN=git.rokkon.com
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    labels:
+      - "traefik.enable=true"
+      # Main Gitea web UI
+      - "traefik.http.routers.gitea.rule=Host(`git.rokkon.com`)"
+      - "traefik.http.routers.gitea.entrypoints=websecure"
+      - "traefik.http.routers.gitea.tls=true"
+      - "traefik.http.routers.gitea.service=gitea-ui"
+      - "traefik.http.services.gitea-ui.loadbalancer.server.port=3000"
+      # Docker registry at docker.rokkon.com
+      - "traefik.http.routers.gitea-docker.rule=Host(`docker.rokkon.com`)"
+      - "traefik.http.routers.gitea-docker.entrypoints=websecure"
+      - "traefik.http.routers.gitea-docker.tls=true"
+      - "traefik.http.routers.gitea-docker.service=gitea-docker"
+      - "traefik.http.services.gitea-docker.loadbalancer.server.port=3000"
+    networks:
+      - proxy
+
+volumes:
+  gitea-data:
+
+networks:
+  proxy:
+    external: true
+    name: monitoring-stack_proxy
